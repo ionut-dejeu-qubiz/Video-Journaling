@@ -9,6 +9,28 @@ import { loadFaceDetection } from '@/lib/face-detection';
 type RecordingState = 'idle' | 'previewing' | 'recording' | 'paused' | 'review' | 'photo-review';
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 type Mood = 'happy' | 'sad' | 'angry' | 'surprised' | 'neutral' | 'fearful' | 'disgusted' | null;
+type TranscriptionStatus = 'inactive' | 'listening' | 'unavailable';
+
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+interface SpeechRecognitionWindow extends Window {
+  SpeechRecognition?: new () => SpeechRecognitionLike;
+  webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+}
 
 const MOOD_EMOJI: Record<NonNullable<Mood>, string> = {
   happy: '😄', sad: '😢', angry: '😠', surprised: '😲',
@@ -33,12 +55,16 @@ export default function Recorder() {
   const lastJokeRef = useRef('');
   const jokeShownAtRef = useRef(0);
   const wasSadRef = useRef(false);
+  const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const speechShouldRunRef = useRef(false);
+  const finalTranscriptRef = useRef('');
 
   const [state, setState] = useState<RecordingState>('idle');
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [title, setTitle] = useState('');
+  const [tags, setTags] = useState('');
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState('');
@@ -50,6 +76,8 @@ export default function Recorder() {
   const [joke, setJoke] = useState<string | null>(null);
   const [jokeVisible, setJokeVisible] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [transcriptionStatus, setTranscriptionStatus] = useState<TranscriptionStatus>('inactive');
 
   const isLive = state === 'previewing' || state === 'recording' || state === 'paused';
 
@@ -159,9 +187,61 @@ export default function Recorder() {
     setJokeVisible(false);
   }, [stopDetectionLoop]);
 
+  const stopTranscription = useCallback(() => {
+    speechShouldRunRef.current = false;
+    const recognition = speechRecognitionRef.current;
+    speechRecognitionRef.current = null;
+    if (recognition) {
+      recognition.onend = null;
+      try { recognition.stop(); } catch { /* recognition may already be stopped */ }
+    }
+    setTranscriptionStatus('inactive');
+  }, []);
+
+  const startTranscription = useCallback(() => {
+    const speechWindow = window as SpeechRecognitionWindow;
+    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+    if (!Recognition) {
+      setTranscriptionStatus('unavailable');
+      return;
+    }
+
+    finalTranscriptRef.current = finalTranscriptRef.current.trim();
+    speechShouldRunRef.current = true;
+    const recognition = new Recognition();
+    speechRecognitionRef.current = recognition;
+    recognition.lang = 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (result.isFinal) finalTranscriptRef.current += `${result[0].transcript.trim()} `;
+        else interim += result[0].transcript;
+      }
+      setTranscript(`${finalTranscriptRef.current}${interim}`.trim());
+    };
+    recognition.onerror = () => {
+      if (speechShouldRunRef.current) setTranscriptionStatus('unavailable');
+    };
+    recognition.onend = () => {
+      if (!speechShouldRunRef.current || speechRecognitionRef.current !== recognition) return;
+      try { recognition.start(); } catch { /* browser may be between recognition sessions */ }
+    };
+    try {
+      recognition.start();
+      setTranscriptionStatus('listening');
+    } catch {
+      setTranscriptionStatus('unavailable');
+    }
+  }, []);
+
   const startRecording = useCallback(() => {
     if (!streamRef.current) return;
     chunksRef.current = [];
+    finalTranscriptRef.current = '';
+    setTranscript('');
     const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
       ? 'video/webm;codecs=vp9,opus' : 'video/webm';
     const recorder = new MediaRecorder(streamRef.current, { mimeType });
@@ -172,24 +252,37 @@ export default function Recorder() {
       const blob = new Blob(chunksRef.current, { type: mimeType });
       setRecordedBlob(blob);
       setRecordingDuration(Math.round((Date.now() - recordingStartRef.current) / 1000));
+      stopTranscription();
       stopCamera();
       setState('review');
     };
     recorder.start(1000);
+    startTranscription();
     setState('recording');
-  }, [stopCamera]);
+  }, [startTranscription, stopCamera, stopTranscription]);
 
   const pauseRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'recording') { mediaRecorderRef.current.pause(); setState('paused'); }
-  }, []);
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.pause();
+      stopTranscription();
+      setState('paused');
+    }
+  }, [stopTranscription]);
 
   const resumeRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'paused') { mediaRecorderRef.current.resume(); setState('recording'); }
-  }, []);
+    if (mediaRecorderRef.current?.state === 'paused') {
+      mediaRecorderRef.current.resume();
+      startTranscription();
+      setState('recording');
+    }
+  }, [startTranscription]);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
-  }, []);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      stopTranscription();
+      mediaRecorderRef.current.stop();
+    }
+  }, [stopTranscription]);
 
   const capturePhoto = useCallback(() => {
     if (!videoRef.current) return;
@@ -211,16 +304,20 @@ export default function Recorder() {
   }, [mirrored, stopCamera]);
 
   const discard = useCallback(() => {
+    stopTranscription();
     setRecordedBlob(null);
     if (photoUrl) URL.revokeObjectURL(photoUrl);
     setPhotoBlob(null);
     setPhotoUrl(null);
     setTitle('');
+    setTags('');
     setUploadStatus('idle');
     setUploadProgress(0);
     setUploadError('');
+    setTranscript('');
+    finalTranscriptRef.current = '';
     setState('idle');
-  }, [photoUrl]);
+  }, [photoUrl, stopTranscription]);
 
   const extractThumbnail = useCallback(async (blob: Blob): Promise<Blob | null> => {
     return new Promise((resolve) => {
@@ -267,6 +364,8 @@ export default function Recorder() {
         fd.append('video', blob, 'recording.webm');
         fd.append('title', title || 'Untitled');
         fd.append('duration', String(recordingDuration));
+        if (transcript.trim()) fd.append('transcript', transcript.trim());
+        if (tags.trim()) fd.append('tags', tags.trim());
         if (thumbnail) fd.append('thumbnail', thumbnail, 'thumbnail.jpg');
         const interval = setInterval(() => setUploadProgress((p) => Math.min(p + 5, 85)), 500);
         const res = await fetch('/api/videos/upload', { method: 'POST', body: fd });
@@ -279,7 +378,7 @@ export default function Recorder() {
       setUploadStatus('error');
       setUploadError(err instanceof Error ? err.message : 'Upload failed');
     }
-  }, [state, photoBlob, recordedBlob, title, recordingDuration, extractThumbnail]);
+  }, [state, photoBlob, recordedBlob, title, tags, recordingDuration, transcript, extractThumbnail]);
 
   useEffect(() => {
     if (recordedBlob && reviewVideoRef.current) reviewVideoRef.current.src = URL.createObjectURL(recordedBlob);
@@ -287,7 +386,7 @@ export default function Recorder() {
 
   useEffect(() => {
     return () => { stopCamera(); if (photoUrl) URL.revokeObjectURL(photoUrl); };
-  }, [stopCamera, photoUrl]);
+  }, [stopCamera, stopTranscription, photoUrl]);
 
   const isReview = state === 'review' || state === 'photo-review';
 
@@ -410,6 +509,22 @@ export default function Recorder() {
         )}
       </div>
 
+      {(state === 'recording' || state === 'paused' || (state === 'review' && transcript)) && (
+        <div className="rounded-2xl border border-white/[0.06] bg-surface-900/70 p-4">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <h2 className="text-sm font-medium text-surface-300">Transcript</h2>
+            {state !== 'review' && (
+              <span className={`text-xs ${transcriptionStatus === 'listening' ? 'text-success' : 'text-warning'}`}>
+                {transcriptionStatus === 'listening' ? 'Listening' : 'Speech recognition unavailable'}
+              </span>
+            )}
+          </div>
+          <p className="text-sm leading-relaxed text-surface-200 whitespace-pre-wrap max-h-32 overflow-y-auto">
+            {transcript || 'Start speaking and your words will appear here.'}
+          </p>
+        </div>
+      )}
+
       {/* Controls */}
       <div className="flex flex-col items-center gap-4">
         {state === 'idle' && (
@@ -467,6 +582,16 @@ export default function Recorder() {
                 className="input-field" placeholder={state === 'photo-review' ? 'e.g. Day 1, Morning selfie…' : 'Give your recording a title…'}
               />
             </div>
+            {state === 'review' && (
+              <div>
+                <label htmlFor="tags" className="block text-sm font-medium text-surface-300 mb-2">Tags</label>
+                <input
+                  id="tags" type="text" value={tags} onChange={(e) => setTags(e.target.value)}
+                  className="input-field" placeholder="e.g. practice, ideas, morning"
+                />
+                <p className="text-xs text-surface-500 mt-1.5">Separate tags with commas.</p>
+              </div>
+            )}
             <UploadProgress progress={uploadProgress} status={uploadStatus} error={uploadError} />
             <div className="flex items-center gap-3">
               <button onClick={discard} className="btn-secondary flex-1" disabled={uploadStatus === 'uploading'}>

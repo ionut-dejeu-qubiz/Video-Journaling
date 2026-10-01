@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPhotoGcsPath, getSignedUrl } from '@/lib/gcs';
+import { getPhotoGcsPath, getFileForUser } from '@/lib/local-storage';
 import { getSessionEmail } from '@/lib/auth';
 
 export async function GET(
@@ -16,18 +16,12 @@ export async function GET(
       return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
     }
 
-    const { url } = await getSignedUrl(gcsPath, 5);
-    const res = await fetch(url);
+    const { buffer, contentType } = await getFileForUser(email, gcsPath);
 
-    if (!res.ok) {
-      return NextResponse.json({ error: 'Failed to fetch photo' }, { status: 502 });
-    }
-
-    const buffer = await res.arrayBuffer();
-
-    return new NextResponse(buffer, {
+    const body = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+    return new NextResponse(body, {
       headers: {
-        'Content-Type': 'image/jpeg',
+        'Content-Type': contentType,
         'Cache-Control': 'private, max-age=300',
       },
     });

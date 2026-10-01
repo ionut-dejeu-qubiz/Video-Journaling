@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deletePhoto } from '@/lib/gcs';
+import { deletePhoto } from '@/lib/local-storage';
 import { getSessionEmail } from '@/lib/auth';
 import type { ApiResponse } from '@/lib/types';
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listPhotos, getSignedUrl } from '@/lib/gcs';
+import { listPhotos, getSignedUrl } from '@/lib/local-storage';
 import { getSessionEmail } from '@/lib/auth';
 import type { ApiResponse, PhotoEntry } from '@/lib/types';
 

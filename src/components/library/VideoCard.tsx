@@ -62,6 +62,20 @@ export default function VideoCard({ video, onClick }: VideoCardProps) {
             </>
           )}
         </div>
+        {video.transcript && (
+          <p className="text-xs text-surface-400 line-clamp-2 pt-1" title={video.transcript}>
+            {video.transcript}
+          </p>
+        )}
+        {video.tags && video.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {video.tags.map((tag) => (
+              <span key={tag} className="px-2 py-0.5 rounded-md bg-accent/10 text-accent-light text-[11px]">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </button>
   );

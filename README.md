@@ -1,6 +1,6 @@
 # Video Journal
 
-Personal video journaling app. Record in the browser, upload to Google Cloud Storage, browse and play back from a library — no database, everything lives in GCS.
+Personal video journaling app. Record in the browser, save files locally, and browse them from a library — no database.
 
 ## Features
 
@@ -10,16 +10,16 @@ Personal video journaling app. Record in the browser, upload to Google Cloud Sto
 - **You Through Time** — uses face-api.js to detect eyes in each photo, aligns them to a fixed point, and stitches everything into a video where your eyes stay locked while everything else changes
 - **Streak** — track your recording consistency with current/longest streak stats and a 90-day activity calendar
 - **Auth** — single-admin login via env-based credentials with secure JWT session cookies
-- **No database** — all data lives in GCS object names, paths, and custom metadata
+- **No database** — all data lives in local files, paths, and sidecar metadata
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 14 (App Router) |
+| Framework | Next.js 16 (App Router) |
 | Language | TypeScript |
 | Styling | Tailwind CSS |
-| Storage | Google Cloud Storage |
+| Storage | Local filesystem |
 | Auth | JWT sessions via `jose` |
 | Recording | MediaRecorder API |
 
@@ -44,21 +44,13 @@ Edit `.env` with your values:
 |----------|-------------|
 | `ADMIN_USERNAME` | Admin login username |
 | `ADMIN_PASSWORD` | Admin login password |
-| `ADMIN_EMAIL` | Admin email — used as the top-level GCS folder to isolate user data |
+| `ADMIN_EMAIL` | Admin email — used as the top-level storage folder to isolate user data |
 | `AUTH_SECRET` | Random secret for JWT signing (`openssl rand -base64 32`) |
-| `GCS_BUCKET_NAME` | Your GCS bucket name |
-| `GCP_PROJECT_ID` | Google Cloud project ID |
-| `GCP_CLIENT_EMAIL` | Service account email |
-| `GCP_PRIVATE_KEY` | Service account private key (include the full PEM block) |
+| `LOCAL_STORAGE_DIR` | Local storage directory; defaults to `./storage` |
 
-### 3. Set up GCS
+### 3. Set up local storage
 
-1. Create a GCS bucket in your Google Cloud project
-2. Create a service account with **Storage Object Admin** role on the bucket
-3. Generate a JSON key for the service account
-4. Copy the `client_email` and `private_key` from the JSON key into your `.env`
-
-The bucket does not need public access — all reads use signed URLs.
+The application creates the directory automatically. Keep `storage/` backed up separately; it is ignored by git.
 
 ### 4. Run
 
@@ -72,21 +64,21 @@ Open [http://localhost:3000](http://localhost:3000) and log in.
 
 ### No-Database Design
 
-All data is derived from GCS objects:
+All data is derived from local files:
 
 | Data | Source |
 |------|--------|
-| Video list | `bucket.getFiles({ prefix: '{email}/videos/' })` — scoped per user, path encodes date and slug |
-| Titles | GCS custom metadata on video objects (`metadata.title`) |
-| Duration | GCS custom metadata (`metadata.durationSeconds`) |
-| File size | GCS object `size` property |
+| Video list | Recursive listing under `{email}/videos/` — scoped per user, path encodes date and slug |
+| Titles | Sidecar metadata (`.meta.json`) next to each media file |
+| Duration | Sidecar metadata (`durationSeconds`) |
+| File size | Local file size |
 | Thumbnails | Matching objects under `{email}/thumbnails/` with same date path and slug |
 | Transcripts | Matching objects under `{email}/transcripts/` (future) |
 | Streak | Computed from unique date prefixes in `{email}/videos/` listing |
 
-### GCS Object Structure
+### Local Storage Structure
 
-All objects are scoped under the user's email as the top-level folder. This keeps each user's data fully isolated and makes it easy to add multi-user support later.
+All files are scoped under the user's email as the top-level folder. This keeps each user's data isolated.
 
 ```
 {email}/
@@ -113,8 +105,8 @@ The timestamp is epoch milliseconds and the slug is derived from the user-provid
 
 - **Library** shows only thumbnail poster images (small JPEGs from `thumbnails/`)
 - Full video is **never preloaded** — it only streams when the user clicks play
-- On click, a signed URL is generated server-side and the `<video>` element streams directly from GCS
-- GCS supports HTTP range requests, so seeking works natively
+- On click, an authenticated local media URL is generated server-side
+- Media is served through the app's `/api/storage` endpoint
 
 ### Thumbnail Generation
 
@@ -128,7 +120,7 @@ Thumbnails are extracted **client-side** before upload:
 1. Login form POSTs credentials to `/api/auth/login`
 2. Server validates against `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars
 3. On success, a JWT containing `{ role, email }` (signed with `AUTH_SECRET`) is set as an HTTP-only, secure cookie
-4. API routes extract `email` from the JWT to scope all GCS operations to that user's folder
+4. API routes extract `email` from the JWT to scope all local storage operations to that user's folder
 5. Next.js middleware checks the cookie on every protected route
 6. Invalid/expired sessions redirect to `/login`
 
@@ -138,7 +130,7 @@ The middleware at `src/middleware.ts` intercepts all routes except `/login`, `/a
 
 ## Transcription
 
-Not included yet — none of the free-tier speech-to-text options (Web Speech API, Whisper, Google STT) work well enough without a paid account. The `transcripts/` prefix in GCS is reserved and `buildTranscriptPath()` exists, so plugging one in later is straightforward.
+Not included yet — none of the free-tier speech-to-text options (Web Speech API, Whisper, Google STT) work well enough without a paid account. The `transcripts/` prefix is reserved and `buildTranscriptPath()` exists, so plugging one in later is straightforward.
 
 ## Project Structure
 
@@ -182,7 +174,7 @@ src/
 ├── lib/
 │   ├── types.ts                    # Shared TypeScript types
 │   ├── auth.ts                     # JWT session utilities
-│   ├── gcs.ts                      # GCS integration
+│   ├── local-storage.ts            # Local filesystem storage
 │   ├── streak.ts                   # Streak computation
 │   └── utils.ts                    # Formatting helpers
 └── middleware.ts                   # Route protection
@@ -190,12 +182,12 @@ src/
 
 ## Production Deployment
 
-For Vercel or similar:
+For Docker or a self-hosted server:
 
 1. Set all env vars in the deployment platform
-2. Ensure `GCP_PRIVATE_KEY` is set correctly (newlines as `\n`)
-3. The `serverActions.bodySizeLimit` in `next.config.js` is set to `500mb` for video uploads
-4. Consider a CDN or Cloud CDN in front of GCS for better streaming performance
+2. Set `LOCAL_STORAGE_DIR` if storage should live outside the project directory
+3. Mount a persistent volume at `/app/storage` when using the Docker image
+4. Back up the storage directory separately from the application
 
 ## Next Steps
 
@@ -204,25 +196,25 @@ For Vercel or similar:
 Right now there's a single admin user via env vars. To support multiple users:
 
 1. Add a real auth provider (NextAuth.js with Google/GitHub OAuth, or Firebase Auth)
-2. Store the authenticated user's email the same way `ADMIN_EMAIL` is used today — it already scopes all GCS paths under `{email}/`, so each user's data is fully isolated
+2. Store the authenticated user's email the same way `ADMIN_EMAIL` is used today — it already scopes all local paths under `{email}/`, so each user's data is isolated
 3. Drop the `ADMIN_*` env vars and the password login route
-4. The rest of the app (GCS paths, library, streak) works as-is with no changes
+4. The rest of the app (storage paths, library, streak) works as-is with no changes
 
 ### Transcription
 
-The `transcripts/` GCS prefix and `buildTranscriptPath()` are already in place. To wire it up:
+The `transcripts/` prefix and `buildTranscriptPath()` are already in place. To wire it up:
 
 1. After upload, send the video to a speech-to-text API (Whisper, Google STT, Deepgram)
 2. Save the result as JSON to `{email}/transcripts/YYYY/MM/DD/{ts}_{slug}.json`
-3. `VideoEntry.hasTranscript` is already computed from the GCS listing — just add a UI to display it
+3. `VideoEntry.hasTranscript` is already computed from the local listing — just add a UI to display it
 
 ### Other ideas
 
-- Tags and notes per recording (store as GCS object metadata or a sidecar JSON)
+- Tags and notes per recording (store in sidecar JSON metadata)
 - Video trimming / editing before upload
 - Screen + camera recording (picture-in-picture)
 - Export / download recordings
 - Shareable signed links with expiry
 - Search across transcripts
-- Cloud CDN in front of GCS for faster streaming
+- Resumable / chunked local uploads for large files
 - Move uploads to resumable / chunked for large files

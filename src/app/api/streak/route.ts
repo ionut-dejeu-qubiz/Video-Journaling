@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUploadDates } from '@/lib/gcs';
+import { getUploadDates } from '@/lib/local-storage';
 import { getSessionEmail } from '@/lib/auth';
 import { computeStreakData } from '@/lib/streak';
 import type { ApiResponse, StreakData } from '@/lib/types';

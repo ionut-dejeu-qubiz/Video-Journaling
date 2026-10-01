@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getVideoGcsPath, getSignedUrl } from '@/lib/gcs';
+import { getVideoGcsPath, getSignedUrl } from '@/lib/local-storage';
 import { getSessionEmail } from '@/lib/auth';
 import type { ApiResponse, SignedUrlResult } from '@/lib/types';
 

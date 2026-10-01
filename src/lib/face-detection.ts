@@ -1,40 +1,23 @@
-const SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
-const WEIGHTS_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
-
 let loadPromise: Promise<any> | null = null;
+let faceApiPromise: Promise<typeof import('@vladmandic/face-api')> | null = null;
 
-function getFaceApi(): any {
-  return (window as any).faceapi;
+function getFaceApi(): Promise<typeof import('@vladmandic/face-api')> {
+  if (!faceApiPromise) faceApiPromise = import('@vladmandic/face-api');
+  return faceApiPromise;
 }
 
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(s);
-  });
-}
+const MODEL_URL = '/models';
 
 export async function loadFaceDetection(): Promise<any> {
-  const existing = getFaceApi();
-  if (existing?.nets?.tinyFaceDetector?.isLoaded) return existing;
+  const faceapi = await getFaceApi();
+  if (faceapi.nets.tinyFaceDetector.isLoaded) return faceapi;
 
   if (loadPromise) return loadPromise;
 
   loadPromise = (async () => {
-    await loadScript(SCRIPT_URL);
-    const faceapi = getFaceApi();
-    if (!faceapi) throw new Error('face-api.js not available after script load');
     await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(WEIGHTS_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(WEIGHTS_URL),
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
     ]);
     return faceapi;
   })();
@@ -49,9 +32,9 @@ export async function loadFaceDetection(): Promise<any> {
 
 export async function loadFaceLandmarks(): Promise<any> {
   await loadFaceDetection();
-  const faceapi = getFaceApi();
+  const faceapi = await getFaceApi();
   if (!faceapi.nets.faceLandmark68TinyNet.isLoaded) {
-    await faceapi.nets.faceLandmark68TinyNet.loadFromUri(WEIGHTS_URL);
+    await faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL);
   }
   return faceapi;
 }

@@ -14,6 +14,8 @@ export interface VideoEntry {
   sizeBytes?: number;
   contentType: string;
   hasTranscript: boolean;
+  transcript?: string;
+  tags?: string[];
 }
 
 export interface StreakData {
