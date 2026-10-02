@@ -12,6 +12,7 @@ export default function LibraryGrid() {
   const [selectedVideo, setSelectedVideo] = useState<VideoEntry | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
+  const [tagFilter, setTagFilter] = useState('');
 
   useEffect(() => {
     fetchVideos();
@@ -40,12 +41,21 @@ export default function LibraryGrid() {
       result = result.filter((v) => v.title.toLowerCase().includes(q));
     }
 
+    if (tagFilter) {
+      result = result.filter((v) => v.tags?.includes(tagFilter));
+    }
+
     if (sortBy === 'oldest') {
       result = [...result].reverse();
     }
 
     return result;
-  }, [videos, searchQuery, sortBy]);
+  }, [videos, searchQuery, sortBy, tagFilter]);
+
+  const availableTags = useMemo(
+    () => Array.from(new Set(videos.flatMap((video) => video.tags || []))).sort((a, b) => a.localeCompare(b)),
+    [videos],
+  );
 
   const groupedVideos = useMemo(() => {
     const groups: { label: string; videos: VideoEntry[] }[] = [];
@@ -112,7 +122,7 @@ export default function LibraryGrid() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Search & Sort */}
+      {/* Search, tag filter & sort */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -127,6 +137,17 @@ export default function LibraryGrid() {
           />
         </div>
         <select
+          aria-label="Filter by tag"
+          value={tagFilter}
+          onChange={(e) => setTagFilter(e.target.value)}
+          className="input-field w-auto min-w-[140px] cursor-pointer"
+        >
+          <option value="">All tags</option>
+          {availableTags.map((tag) => (
+            <option key={tag} value={tag}>{tag}</option>
+          ))}
+        </select>
+        <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as 'newest' | 'oldest')}
           className="input-field w-auto min-w-[140px] cursor-pointer"
@@ -140,6 +161,7 @@ export default function LibraryGrid() {
       <p className="text-sm text-surface-500">
         {filteredVideos.length} recording{filteredVideos.length !== 1 ? 's' : ''}
         {searchQuery && ` matching "${searchQuery}"`}
+        {tagFilter && ` tagged "${tagFilter}"`}
       </p>
 
       {/* Grouped grid */}
@@ -160,9 +182,9 @@ export default function LibraryGrid() {
         </div>
       ))}
 
-      {filteredVideos.length === 0 && searchQuery && (
+      {filteredVideos.length === 0 && (searchQuery || tagFilter) && (
         <div className="text-center py-12">
-          <p className="text-surface-400">No recordings match your search</p>
+          <p className="text-surface-400">No recordings match your filters</p>
         </div>
       )}
 

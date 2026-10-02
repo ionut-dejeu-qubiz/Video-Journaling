@@ -10,6 +10,12 @@ type RecordingState = 'idle' | 'previewing' | 'recording' | 'paused' | 'review' 
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 type Mood = 'happy' | 'sad' | 'angry' | 'surprised' | 'neutral' | 'fearful' | 'disgusted' | null;
 type TranscriptionStatus = 'inactive' | 'listening' | 'unavailable';
+type TranscriptionLanguage = 'en-US' | 'ro-RO';
+
+const TRANSCRIPTION_LANGUAGES: Array<{ value: TranscriptionLanguage; label: string }> = [
+  { value: 'en-US', label: 'English' },
+  { value: 'ro-RO', label: 'Romanian' },
+];
 
 interface SpeechRecognitionEventLike {
   resultIndex: number;
@@ -78,6 +84,7 @@ export default function Recorder() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [transcriptionStatus, setTranscriptionStatus] = useState<TranscriptionStatus>('inactive');
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState<TranscriptionLanguage>('en-US');
 
   const isLive = state === 'previewing' || state === 'recording' || state === 'paused';
 
@@ -198,7 +205,7 @@ export default function Recorder() {
     setTranscriptionStatus('inactive');
   }, []);
 
-  const startTranscription = useCallback(() => {
+  const startTranscription = useCallback((language: TranscriptionLanguage = transcriptionLanguage) => {
     const speechWindow = window as SpeechRecognitionWindow;
     const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
     if (!Recognition) {
@@ -210,7 +217,7 @@ export default function Recorder() {
     speechShouldRunRef.current = true;
     const recognition = new Recognition();
     speechRecognitionRef.current = recognition;
-    recognition.lang = 'en-US';
+    recognition.lang = language;
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.onresult = (event) => {
@@ -235,7 +242,15 @@ export default function Recorder() {
     } catch {
       setTranscriptionStatus('unavailable');
     }
-  }, []);
+  }, [transcriptionLanguage]);
+
+  const changeTranscriptionLanguage = useCallback((language: TranscriptionLanguage) => {
+    setTranscriptionLanguage(language);
+    if (state === 'recording') {
+      stopTranscription();
+      startTranscription(language);
+    }
+  }, [startTranscription, state, stopTranscription]);
 
   const startRecording = useCallback(() => {
     if (!streamRef.current) return;
@@ -514,9 +529,22 @@ export default function Recorder() {
           <div className="flex items-center justify-between gap-3 mb-2">
             <h2 className="text-sm font-medium text-surface-300">Transcript</h2>
             {state !== 'review' && (
-              <span className={`text-xs ${transcriptionStatus === 'listening' ? 'text-success' : 'text-warning'}`}>
-                {transcriptionStatus === 'listening' ? 'Listening' : 'Speech recognition unavailable'}
-              </span>
+              <div className="flex items-center gap-3">
+                <label htmlFor="transcription-language" className="sr-only">Transcription language</label>
+                <select
+                  id="transcription-language"
+                  value={transcriptionLanguage}
+                  onChange={(event) => changeTranscriptionLanguage(event.target.value as TranscriptionLanguage)}
+                  className="bg-surface-800 border border-white/[0.08] rounded-lg px-2 py-1 text-xs text-surface-200"
+                >
+                  {TRANSCRIPTION_LANGUAGES.map((language) => (
+                    <option key={language.value} value={language.value}>{language.label}</option>
+                  ))}
+                </select>
+                <span className={`text-xs ${transcriptionStatus === 'listening' ? 'text-success' : 'text-warning'}`}>
+                  {transcriptionStatus === 'listening' ? 'Listening' : 'Speech recognition unavailable'}
+                </span>
+              </div>
             )}
           </div>
           <p className="text-sm leading-relaxed text-surface-200 whitespace-pre-wrap max-h-32 overflow-y-auto">
